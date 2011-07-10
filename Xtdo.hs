@@ -84,9 +84,10 @@ xtdo ("a":when:xs) x today
     makeTask n s c = blankTask{name=intercalate " " n,scheduled=s,category=c}
 addCategory tasks today = map (addCategoryToTask today) tasks
   where
-    addCategoryToTask today Task{name=n,scheduled=Just s}
-      | s == today = blankTask{name=n,scheduled=Just s,category=Today}
-      | otherwise  = blankTask{name=n,scheduled=Just s,category=Scheduled}
+    addCategoryToTask today task =
+      task { category = if scheduled task == Just today
+                          then Today
+                          else Scheduled }
 
     addCategoryToTask today Task{name=n,scheduled=Nothing}
                  = blankTask{name=n,scheduled=Nothing,category=Next}
@@ -146,7 +147,7 @@ calculateNextOccurrence today (RecurFrequency Day multiplier _) =
   (intervalToModifier Day) (toInteger multiplier) today
 
 calculateNextOccurrence today (RecurFrequency Week multiplier offset) =
-  head $ dropWhile (\x -> x <= today) (frequenciesFrom startingDay)
+  head $ dropWhile (<= today) (frequenciesFrom startingDay)
   where frequenciesFrom day     = frequencySeq $
                                   addDays (toInteger offset) (startOfWeek day)
         frequencySeq day        = day:(frequencySeq $ stepByInterval day Forward)
@@ -217,9 +218,7 @@ prettyFormatter categoriesToDisplay programData = do
 
 completionFormatter :: [TaskCategory] -> ProgramData -> IO ()
 completionFormatter categoriesToDisplay programData = do
-  forM [t | t <- tasks programData] (\task -> do
-    putStrLn $ hyphenize (name task)
-    )
+  forM (tasks programData) (putStrLn . hyphenize . name)
   putStr ""
 
 recurringFormatter :: ProgramData -> IO ()
@@ -231,9 +230,9 @@ recurringFormatter programData = do
   putStrLn ""
 
   setSGR [Reset]
-  forM (recurring programData) (\definition -> do
-    putStrLn $ "  " ++ templateName definition
-    )
+  forM (recurring programData) 
+    (putStrLn . ("  "++) .templateName)
+
   putStrLn ""
 
 hyphenize x = subRegex (mkRegex "[^a-zA-Z0-9]") x "-"
@@ -265,7 +264,8 @@ dayToString = intercalate "-" . map show . toList . toGregorian
 frequencyToString :: RecurFrequency -> String
 frequencyToString x = "1d"
 
-flatten = foldl (++) [] -- Surely this is in the stdlib?
+-- flatten = foldl (++) [] -- Surely this is in the stdlib?
+flatten = concat -- it is indeed
 
 loadYaml :: IO ProgramData
 loadYaml = do
@@ -292,12 +292,7 @@ extractRecurring x = do
     }
 
 parseDay :: String -> Day
-parseDay x =
-  unwrapDay (toDay $ Just x)
-  where unwrapDay :: Maybe Day -> Day
-        unwrapDay Nothing  = error x
-        unwrapDay (Just x) = x
-
+parseDay x = maybe (error x) id (toDay $ Just x)
 
 extractTask
   :: (Failure ObjectExtractError m) => StringObject -> m Task
@@ -308,7 +303,5 @@ extractTask task = do
   return blankTask{name=n, scheduled=toDay s, category=Next}
 
 toDay :: Maybe String -> Maybe Day
-toDay Nothing = Nothing
-toDay (Just str) =
-  Just $ fromGregorian (toInteger $ x!!0) (x!!1) (x!!2)
-  where x = (map read $ splitOn "-" str :: [Int])
+toDay = fmap (\str -> let x = map read $ splitOn "-" str :: [Int]
+                      in fromGregorian (toInteger $ x!!0) (x!!1) (x!!2))
